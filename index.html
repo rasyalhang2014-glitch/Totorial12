@@ -1,0 +1,1039 @@
+<!DOCTYPE html>  <html lang="id">  
+<head>  
+<meta charset="UTF-8">  
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">  
+<title>STEAL A EGG MULTIPLAYER</title>  <style>  
+*{box-sizing:border-box}  
+body{margin:0;background:#172b20;color:white;font-family:Arial;overflow:hidden}  
+canvas{width:100vw;height:100vh;display:block;touch-action:none}  
+#hud{position:fixed;top:6px;left:7px;right:7px;display:flex;justify-content:space-between;gap:4px;pointer-events:none}  
+.tag{background:#101820dd;padding:8px;border-radius:9px;font-size:11px}  
+#eventBanner{position:fixed;top:42px;left:50%;transform:translateX(-50%);z-index:2;background:linear-gradient(90deg,#9b280d,#ff8c22);border:2px solid #ffd66b;border-radius:10px;padding:7px 12px;text-align:center;font-weight:bold;min-width:230px;font-size:13px;pointer-events:none}  
+#eventStatus{display:block;font-size:10px;margin-top:3px}  
+#stick{position:fixed;bottom:16px;left:15px;width:120px;height:120px;border-radius:50%;background:#ffffff35;border:2px solid white;touch-action:none}  
+#knob{width:46px;height:46px;background:#fff9;border-radius:50%;position:absolute;left:35px;top:35px;pointer-events:none}  
+#controls{position:fixed;right:7px;bottom:10px;display:grid;grid-template-columns:repeat(2,auto);gap:5px;max-height:65vh;overflow-y:auto}  
+button{border:0;border-radius:9px;padding:9px;background:#ffcb42;font-weight:bold;color:#302000;font-size:11px}  
+button:disabled{opacity:.4}  
+#panel{display:none;position:fixed;z-index:5;top:50%;left:50%;transform:translate(-50%,-50%);background:#172b3b;padding:13px;border:2px solid white;border-radius:15px;width:92%;max-width:410px;max-height:78vh;overflow:auto}  
+#panel button{margin:4px}  
+.eggcard{background:#29465a;padding:10px;margin:8px 0;border-radius:10px}  
+.timer{color:#ffe17b;font-weight:bold;margin-top:5px}  
+#toast{position:fixed;z-index:8;bottom:150px;left:50%;transform:translateX(-50%);background:#111;padding:10px;border-radius:10px;display:none;white-space:nowrap}  
+#adminForm input,#roomForm input{width:100%;padding:10px;margin:5px 0;border-radius:8px;border:0}  
+.small{font-size:11px;color:#b9d6e8}  
+</style>  </head>  
+<body>  <canvas id="game"></canvas>
+
+<div id="hud">  
+ <div class="tag" id="money">💰 0</div>  
+ <div class="tag" id="biome">🌳 FOREST</div>  
+ <div class="tag" id="onlineStatus">🔴 OFFLINE</div>  
+</div>  <div id="eventBanner">  
+ 🎃 HALLOWEEN  
+ <span id="eventStatus">Memuat jadwal...</span>  
+</div>  <div id="stick"><div id="knob"></div></div>  <div id="controls">  
+ <button onclick="takeEgg()">🥚 AMBIL</button>  
+ <button onclick="placeInBase()">📥 TARUH DI BASE</button>  
+ <button onclick="baseMenu()">🏠 BASE</button>  
+ <button onclick="inventory()">🎒 TAS</button>  
+ <button onclick="hatchAll()">🐣 MENETAS</button>  
+ <button onclick="showIndex()">📖 INDEX</button>  
+ <button onclick="treadmill()">🏃 LATIHAN</button>  
+ <button onclick="admin()">⚙ ADMIN</button>  
+ <button onclick="roomMenu()">🌐 ROOM</button>  
+ <button onclick="saveGame()">💾 SIMPAN GAME</button>  
+ <button onclick="loadGame()">📂 LOAD GAME</button>  
+</div>  <div id="panel"></div>  
+<div id="toast"></div>  <!-- FIREBASE SDK -->  <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>  <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-auth-compat.js"></script>  <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-database-compat.js"></script>  <script>  
+/* ===============================  
+   FIREBASE CONFIGURATION  
+================================ */  
+  
+const firebaseConfig = {  
+ apiKey:"AIzaSyCcU95F75Bz98SqKbIwjlkCPlX3TIKmUGc",  
+ authDomain:"steal-a-egg-2de36.firebaseapp.com",  
+ databaseURL:"https://steal-a-egg-2de36-default-rtdb.europe-west1.firebasedatabase.app/",  
+ projectId:"steal-a-egg-2de36",  
+ storageBucket:"steal-a-egg-2de36.firebasestorage.app",  
+ messagingSenderId:"776560214592",  
+ appId:"1:776560214577656021459292:web:d4f2ab98a329636530d5a5"  
+};  
+  
+firebase.initializeApp(firebaseConfig);  
+  
+const db=firebase.database();  
+const auth=firebase.auth();  
+  
+let roomUID=null;  
+let roomCode="";  
+let roomHost="";  
+let roomPlayers={};  
+let roomEvents=[];  
+let roomActive=false;  
+let roomPlayerRef=null;  
+let roomPlayersRef=null;  
+let roomEventsRef=null;  
+let lastPositionSync=0;  
+let playerName="Pemain";  
+  
+/* LOGIN ANONIM */  
+auth.signInAnonymously().then(result=>{  
+ roomUID=result.user.uid;  
+ document.getElementById("onlineStatus").textContent="🟢 TERHUBUNG";  
+ toast("Firebase berhasil terhubung!");  
+}).catch(error=>{  
+ console.error(error);  
+ document.getElementById("onlineStatus").textContent="🔴 OFFLINE";  
+ toast("Firebase gagal. Periksa konfigurasi dan Rules!");  
+});  
+  
+/* ===============================  
+   GAME DASAR  
+================================ */  
+  
+const canvas=document.getElementById("game");  
+const c=canvas.getContext("2d");  
+  
+let W,H;  
+function resize(){  
+ W=canvas.width=innerWidth;  
+ H=canvas.height=innerHeight;  
+}  
+resize();  
+onresize=resize;  
+  
+const biomes=[  
+ {name:"Forest",color:"#397c42",emoji:"🌳"},  
+ {name:"Lake",color:"#237eaa",emoji:"🌊"},  
+ {name:"Desert",color:"#b98b4d",emoji:"🏜️"},  
+ {name:"Snow",color:"#a8d9e9",emoji:"❄️"},  
+ {name:"Volcano",color:"#803c32",emoji:"🌋"},  
+ {name:"Cosmic",color:"#48216d",emoji:"🌌"}  
+];  
+  
+let player={x:300,y:350,speed:2.8};  
+let eggs=[],pets=[],index=[],inventoryEggs=[];  
+let money=0,worldWidth=2580;  
+let joy={x:0,y:0,active:false};  
+const base={x:65,y:340,eggs:[]};  
+  
+const guards=[  
+ {animal:"🐻",biome:"Forest",x:200,y:600,hx:200,hy:600,speed:1.8},  
+ {animal:"🦈",biome:"Lake",x:630,y:600,hx:630,hy:600,speed:2},  
+ {animal:"🦂",biome:"Desert",x:1060,y:600,hx:1060,hy:600,speed:1.9},  
+ {animal:"🐻‍❄️",biome:"Snow",x:1490,y:600,hx:1490,hy:600,speed:1.9},  
+ {animal:"🐉",biome:"Volcano",x:1920,y:600,hx:1920,hy:600,speed:2.4}  
+];  
+  
+const colors={  
+ Common:"#eee",Uncommon:"#65ed91",Rare:"#50aaff",  
+ Epic:"#bb75ff",Legendary:"#ffb83f",Mythic:"#ff4d9d",  
+ Divine:"#fff36b",Cosmic:"#e9a2ff"  
+};  
+  
+function toast(msg){  
+ let t=document.getElementById("toast");  
+ t.textContent=msg;  
+ t.style.display="block";  
+ clearTimeout(window.toastTimeout);  
+ window.toastTimeout=setTimeout(()=>t.style.display="none",2000);  
+}  
+  
+function getBiome(x){  
+ return biomes[Math.max(0,Math.min(5,Math.floor(x/430)))];  
+}  
+  
+function distance(a,b){  
+ return Math.hypot(a.x-b.x,a.y-b.y);  
+}  
+  
+function makeEggs(){  
+ eggs=[];  
+ biomes.forEach((b,bi)=>{  
+  for(let i=0;i<8;i++){  
+   eggs.push({  
+    name:b.name+" "+["Sprout","River","Dune","Frost","Ember","Nova","Royal","Eternal"][i]+" Egg",  
+    biome:b.name,  
+    rarity:bi===5?"Cosmic":["Common","Uncommon","Rare","Epic","Legendary","Mythic","Divine","Divine"][i],  
+    x:bi*430+100+Math.random()*200,  
+    y:150+Math.random()*500,  
+    hatch:[60,90,120,150,180,240,300,360][i],  
+    value:[2,4,8,15,30,60,120,300][i],  
+    taken:false  
+   });  
+  }  
+ });  
+}  
+makeEggs();  
+  
+/* ===============================  
+   GAMBAR DUNIA  
+================================ */  
+  
+function drawBase(){  
+ c.fillStyle="#5b3924";  
+ c.fillRect(base.x-15,base.y+100,230,15);  
+ c.fillStyle="#d7a66a";  
+ c.fillRect(base.x,base.y,200,105);  
+ c.fillStyle="#b83232";  
+ c.beginPath();  
+ c.moveTo(base.x-15,base.y);  
+ c.lineTo(base.x+100,base.y-75);  
+ c.lineTo(base.x+215,base.y);  
+ c.fill();  
+ c.fillStyle="#56321f";  
+ c.fillRect(base.x+78,base.y+45,45,60);  
+ c.fillStyle="#8eeaff";  
+ c.fillRect(base.x+18,base.y+30,38,30);  
+ c.fillRect(base.x+145,base.y+30,38,30);  
+ c.fillStyle="white";  
+ c.font="bold 17px Arial";  
+ c.textAlign="left";  
+ c.fillText("MY BASE",base.x+65,base.y-85);  
+ c.fillStyle="#7a4b27";  
+ c.fillRect(base.x+225,base.y+55,85,50);  
+ c.fillStyle="#ffd45a";  
+ c.fillRect(base.x+235,base.y+45,65,12);  
+ c.fillStyle="white";  
+ c.font="12px Arial";  
+ c.fillText("STORAGE",base.x+230,base.y+125);  
+ c.fillText("🥚 "+base.eggs.length,base.x+245,base.y+80);  
+ c.fillStyle="#354b5d";  
+ c.fillRect(base.x+325,base.y+25,80,80);  
+ c.fillStyle="#70dfff";  
+ c.fillRect(base.x+337,base.y+37,56,42);  
+ c.fillStyle="white";  
+ c.fillText("HATCH",base.x+343,base.y+95);  
+}  
+  
+function drawPlayer(){  
+ c.fillStyle="#eabf9c";  
+ c.fillRect(player.x-9,player.y-25,18,18);  
+ c.fillStyle="#a83227";  
+ c.fillRect(player.x-11,player.y-29,22,7);  
+ c.fillStyle="#2679d8";  
+ c.fillRect(player.x-12,player.y-7,24,22);  
+ c.fillStyle="#171717";  
+ c.fillRect(player.x-5,player.y-18,3,3);  
+ c.fillRect(player.x+3,player.y-18,3,3);  
+ c.fillStyle="white";  
+ c.font="bold 12px Arial";  
+ c.textAlign="center";  
+ c.fillText("YOU",player.x,player.y-37);  
+}  
+  
+/* PEMAIN LAIN */  
+function drawRoomPlayers(){  
+ if(!roomActive)return;  
+  
+ Object.keys(roomPlayers).forEach(uid=>{  
+  if(uid===roomUID)return;  
+  let p=roomPlayers[uid];  
+  if(!p||typeof p.x!=="number"||typeof p.y!=="number")return;  
+  
+  c.fillStyle="#ffd28a";  
+  c.fillRect(p.x-9,p.y-25,18,18);  
+  c.fillStyle="#9b4bdb";  
+  c.fillRect(p.x-12,p.y-7,24,22);  
+  
+  c.fillStyle="white";  
+  c.font="bold 12px Arial";  
+  c.textAlign="center";  
+  c.fillText(p.name||"Pemain",p.x,p.y-36);  
+  
+  c.fillStyle="#ffe66b";  
+  c.font="10px Arial";  
+  c.fillText("ONLINE",p.x,p.y+27);  
+ });  
+}  
+  
+function draw(){  
+ c.clearRect(0,0,W,H);  
+  
+ let cam=Math.max(0,Math.min(worldWidth-W,player.x-W/2));  
+  
+ c.save();  
+ c.translate(-cam,0);  
+  
+ biomes.forEach((b,i)=>{  
+  c.fillStyle=b.color;  
+  c.fillRect(i*430,0,430,900);  
+  c.fillStyle="#ffffff20";  
+  
+  for(let j=0;j<9;j++){  
+   c.beginPath();  
+   c.arc(i*430+j*43+20,100+j*53%600,18,0,7);  
+   c.fill();  
+  }  
+  
+  c.fillStyle="white";  
+  c.font="bold 24px Arial";  
+  c.textAlign="left";  
+  c.fillText(b.emoji+" "+b.name.toUpperCase(),i*430+20,40);  
+ });  
+  
+ drawBase();  
+  
+ eggs.forEach(e=>{  
+  if(e.taken)return;  
+  c.fillStyle=colors[e.rarity]||"white";  
+  c.beginPath();  
+  c.ellipse(e.x,e.y,14,19,0,0,7);  
+  c.fill();  
+  c.strokeStyle="#333";  
+  c.stroke();  
+  c.fillStyle="white";  
+  c.font="11px Arial";  
+  c.textAlign="center";  
+  c.fillText(e.rarity,e.x,e.y-25);  
+ });  
+  
+ guards.forEach(g=>{  
+  c.font="35px Arial";  
+  c.textAlign="center";  
+  c.fillText(g.animal,g.x,g.y);  
+  c.font="11px Arial";  
+  c.fillStyle="white";  
+  c.fillText("GUARD",g.x,g.y+12);  
+ });  
+  
+ drawRoomPlayers();  
+ drawPlayer();  
+ c.restore();  
+  
+ document.getElementById("money").textContent="💰 "+money;  
+ document.getElementById("biome").textContent=getBiome(player.x).emoji+" "+getBiome(player.x).name.toUpperCase();  
+}  
+  
+/* ===============================  
+   GERAK DAN PENJAGA  
+================================ */  
+  
+function move(){  
+ player.x+=joy.x*player.speed;  
+ player.y+=joy.y*player.speed;  
+  
+ player.x=Math.max(15,Math.min(worldWidth-15,player.x));  
+ player.y=Math.max(65,Math.min(780,player.y));  
+  
+ let carried=inventoryEggs.length?  
+ inventoryEggs[inventoryEggs.length-1].biome:null;  
+  
+ guards.forEach(g=>{  
+  if(carried===g.biome&&getBiome(player.x).name===g.biome){  
+   let dx=player.x-g.x;  
+   let dy=player.y-g.y;  
+   let d=Math.hypot(dx,dy)||1;  
+  
+   g.x+=dx/d*g.speed;  
+   g.y+=dy/d*g.speed;  
+  
+   if(d<23){  
+    inventoryEggs.pop();  
+    toast("Penjaga merebut telur!");  
+    g.x=g.hx;  
+    g.y=g.hy;  
+   }  
+  }else{  
+   let dx=g.hx-g.x;  
+   let dy=g.hy-g.y;  
+   let d=Math.hypot(dx,dy)||1;  
+   if(d>5){  
+    g.x+=dx/d*.7;  
+    g.y+=dy/d*.7;  
+   }  
+  }  
+ });  
+}  
+  
+/* ===============================  
+   JOYSTICK  
+================================ */  
+  
+const stick=document.getElementById("stick");  
+const knob=document.getElementById("knob");  
+  
+function joyMove(e){  
+ let r=stick.getBoundingClientRect();  
+ let dx=e.clientX-(r.left+r.width/2);  
+ let dy=e.clientY-(r.top+r.height/2);  
+ let max=42;  
+ let d=Math.hypot(dx,dy);  
+  
+ if(d>max){  
+  dx=dx/d*max;  
+  dy=dy/d*max;  
+ }  
+  
+ knob.style.left=(35+dx)+"px";  
+ knob.style.top=(35+dy)+"px";  
+ joy.x=dx/max;  
+ joy.y=dy/max;  
+}  
+  
+function stopJoy(){  
+ joy.x=0;  
+ joy.y=0;  
+ joy.active=false;  
+ knob.style.left="35px";  
+ knob.style.top="35px";  
+}  
+  
+stick.addEventListener("pointerdown",e=>{  
+ joy.active=true;  
+ stick.setPointerCapture(e.pointerId);  
+ joyMove(e);  
+});  
+stick.addEventListener("pointermove",e=>{  
+ if(joy.active)joyMove(e);  
+});  
+stick.addEventListener("pointerup",stopJoy);  
+stick.addEventListener("pointercancel",stopJoy);  
+stick.addEventListener("lostpointercapture",stopJoy);  
+  
+/* ===============================  
+   TELUR  
+================================ */  
+  
+function takeEgg(){  
+ let nearest=null,best=70;  
+  
+ eggs.forEach(e=>{  
+  if(!e.taken){  
+   let d=distance(player,e);  
+   if(d<best){  
+    best=d;  
+    nearest=e;  
+   }  
+  }  
+ });  
+  
+ if(!nearest){  
+  toast("Tidak ada telur di dekatmu!");  
+  return;  
+ }  
+  
+ nearest.taken=true;  
+ inventoryEggs.push(nearest);  
+ toast("🥚 Berhasil mengambil telur!");  
+}  
+  
+function placeInBase(){  
+ if(distance(player,{x:base.x+100,y:base.y+50})>190){  
+  toast("Dekati Base!");  
+  return;  
+ }  
+  
+ if(!inventoryEggs.length){  
+  toast("Tas telur kosong!");  
+  return;  
+ }  
+  
+ let e=inventoryEggs.pop();  
+ base.eggs.push({...e,storedAt:Date.now()});  
+ toast("📥 Telur disimpan di Base!");  
+}  
+  
+function getRemaining(e){  
+ return Math.max(0,Math.ceil(e.hatch-(Date.now()-e.storedAt)/1000));  
+}  
+  
+function formatTime(s){  
+ return String(Math.floor(s/60)).padStart(2,"0")+":"+String(s%60).padStart(2,"0");  
+}  
+  
+/* ===============================  
+   BASE DAN MENETAS  
+================================ */  
+  
+function baseMenu(){  
+ if(distance(player,{x:base.x+100,y:base.y+50})>230){  
+  toast("Dekati Base terlebih dahulu!");  
+  return;  
+ }  
+  
+ let p=document.getElementById("panel");  
+ p.style.display="block";  
+  
+ function update(){  
+  if(p.style.display==="none")return;  
+  
+  let html="<h2>🏠 MY BASE</h2><h3>🥚 STORAGE TELUR</h3>";  
+  
+  if(!base.eggs.length)html+="<p>Belum ada telur.</p>";  
+  
+  base.eggs.forEach((e,i)=>{  
+   let s=getRemaining(e);  
+   html+=`<div class="eggcard"><b>🥚 ${e.name}</b><br>  
+   Rarity: ${e.rarity}  
+   <div class="timer">${s>0?"⏳ Menetas dalam "+formatTime(s):"✅ SIAP MENETAS"}</div>  
+   <button onclick="hatchBase(${i})" ${s>0?"disabled":""}>🐣 TETASKAN</button></div>`;  
+  });  
+  
+  html+="<button onclick='hatchAll()'>🐣 MENETAS SEMUA</button>";  
+  html+="<button onclick='closePanel()'>TUTUP</button>";  
+  p.innerHTML=html;  
+ }  
+  
+ clearInterval(window.baseTimer);  
+ update();  
+ window.baseTimer=setInterval(update,1000);  
+}  
+  
+function closePanel(){  
+ document.getElementById("panel").style.display="none";  
+ clearInterval(window.baseTimer);  
+}  
+  
+function makePet(e){  
+ let name=e.name.replace("Egg","Pet");  
+ pets.push({name,rarity:e.rarity,value:e.value});  
+ if(!index.includes(name))index.push(name);  
+ money+=e.value;  
+}  
+  
+function hatchBase(i){  
+ let e=base.eggs[i];  
+ if(!e)return;  
+ if(getRemaining(e)>0){  
+  toast("Telur belum siap!");  
+  return;  
+ }  
+ base.eggs.splice(i,1);  
+ makePet(e);  
+ toast("🐣 Telur menetas!");  
+ baseMenu();  
+}  
+  
+function hatchAll(){  
+ let ready=base.eggs.map((e,i)=>({e,i}))  
+ .filter(x=>getRemaining(x.e)===0);  
+  
+ if(!ready.length){  
+  toast("Belum ada telur siap menetas!");  
+  return;  
+ }  
+  
+ ready.reverse().forEach(({e,i})=>{  
+  base.eggs.splice(i,1);  
+  makePet(e);  
+ });  
+  
+ toast("🐣 "+ready.length+" telur menetas!");  
+  
+ if(document.getElementById("panel").style.display==="block"){  
+  baseMenu();  
+ }  
+}  
+  
+/* ===============================  
+   TAS DAN INDEX  
+================================ */  
+  
+function inventory(){  
+ let p=document.getElementById("panel");  
+ p.style.display="block";  
+ let h="<h2>🎒 TAS</h2><h3>Telur</h3>";  
+  
+ if(!inventoryEggs.length)h+="<p>Tas kosong.</p>";  
+  
+ inventoryEggs.forEach(e=>{  
+  h+=`<div class="eggcard">🥚 ${e.name}</div>`;  
+ });  
+  
+ h+="<h3>Hewan</h3>";  
+  
+ pets.forEach(e=>{  
+  h+=`<div class="eggcard">🐾 ${e.name} - ${e.rarity}</div>`;  
+ });  
+  
+ h+="<button onclick='closePanel()'>TUTUP</button>";  
+ p.innerHTML=h;  
+}  
+  
+function showIndex(){  
+ let p=document.getElementById("panel");  
+ p.style.display="block";  
+ let h="<h2>📖 INDEX</h2><p>Ditemukan: "+index.length+"</p>";  
+  
+ index.forEach(n=>{  
+  h+=`<div class="eggcard">🐾 ${n}</div>`;  
+ });  
+  
+ h+="<button onclick='closePanel()'>TUTUP</button>";  
+ p.innerHTML=h;  
+}  
+  
+function treadmill(){  
+ money+=5;  
+ toast("🏃 Latihan selesai +5 uang");  
+}  
+  
+/* ===============================  
+   EVENT  
+================================ */  
+  
+let eventSchedules=[];  
+  
+try{  
+ eventSchedules=JSON.parse(localStorage.getItem("SAE_EVENTS")||"null")||[];  
+}catch(e){  
+ eventSchedules=[];  
+}  
+  
+if(!Array.isArray(eventSchedules))eventSchedules=[];  
+  
+if(!eventSchedules.some(e=>e.name==="HALLOWEEN")){  
+ eventSchedules.push({  
+  name:"HALLOWEEN",  
+  theme:"🎃 Halloween",  
+  start:"2026-11-12T15:00",  
+  duration:24  
+ });  
+}  
+  
+function saveEvents(){  
+ localStorage.setItem("SAE_EVENTS",JSON.stringify(eventSchedules));  
+}  
+  
+saveEvents();  
+  
+function eventInfo(e){  
+ let now=Date.now();  
+ let start=new Date(e.start).getTime();  
+ let end=start+e.duration*3600000;  
+  
+ if(now<start)return {status:"UPCOMING",remaining:Math.ceil((start-now)/1000)};  
+ if(now<end)return {status:"ACTIVE",remaining:Math.ceil((end-now)/1000)};  
+ return {status:"ENDED",remaining:0};  
+}  
+  
+function updateEventBanner(){  
+ let active=eventSchedules.filter(e=>eventInfo(e).status==="ACTIVE")  
+ .sort((a,b)=>new Date(a.start)-new Date(b.start))[0];  
+  
+ let upcoming=eventSchedules.filter(e=>eventInfo(e).status==="UPCOMING")  
+ .sort((a,b)=>new Date(a.start)-new Date(b.start))[0];  
+  
+ let e=active||upcoming;  
+ let banner=document.getElementById("eventBanner");  
+  
+ if(!e){  
+  banner.innerHTML="🎉 TIDAK ADA EVENT AKTIF<span id='eventStatus'>Tunggu event berikutnya</span>";  
+  return;  
+ }  
+  
+ let info=eventInfo(e);  
+  
+ banner.innerHTML=`${e.theme} ${e.name}  
+ <span id="eventStatus">${info.status==="ACTIVE"?"🟢 EVENT BERLANGSUNG • Sisa ":"🕒 DIMULAI DALAM "}${formatTime(info.remaining)}</span>`;  
+}  
+  
+setInterval(updateEventBanner,1000);  
+updateEventBanner();  
+  
+/* ===============================  
+   ADMIN  
+================================ */  
+  
+function admin(){  
+ let pass=prompt("Masukkan password admin:");  
+ if(pass!=="SAE"){  
+  toast("Password salah!");  
+  return;  
+ }  
+ eventAdmin();  
+}  
+  
+function eventAdmin(){  
+ let p=document.getElementById("panel");  
+ p.style.display="block";  
+  
+ let html=`<h2>⚙ ADMIN PANEL</h2>  
+ <button onclick="money+=1000;toast('Uang +1000')">💰 Tambah uang</button>  
+ <button onclick="makeEggs();toast('Telur dibuat ulang')">🥚 Buat telur</button>  
+ <hr><h3>📅 BUAT JADWAL EVENT</h3>  
+ <div id="adminForm">  
+ <label>Nama Event</label><input id="evName" placeholder="Contoh: Halloween">  
+ <label>Tema Event</label><input id="evTheme" placeholder="Contoh: 🎃 Halloween">  
+ <label>Tanggal dan Jam Mulai</label><input id="evDate" type="datetime-local">  
+ <label>Durasi (jam)</label><input id="evDuration" type="number" min="1" value="24">  
+ <button onclick="createEvent()">BUAT EVENT</button>  
+ </div><hr><h3>📋 JADWAL EVENT</h3>`;  
+  
+ eventSchedules.forEach((e,i)=>{  
+  let info=eventInfo(e);  
+  html+=`<div class="eggcard"><b>${e.theme} ${e.name}</b><br>  
+  Mulai: ${e.start.replace("T"," ")}<br>  
+  Durasi: ${e.duration} jam<br>  
+  Status: ${info.status}<br>  
+  <button onclick="deleteEvent(${i})">HAPUS</button></div>`;  
+ });  
+  
+ html+="<button onclick='closePanel()'>TUTUP</button>";  
+ p.innerHTML=html;  
+}  
+  
+
+function createEvent(){
+ if(roomActive&&roomUID!==roomHost){
+  toast("Hanya host room yang bisa membuat event!");
+  return;
+ }
+
+ const name=document.getElementById("evName")?.value.trim();
+ const theme=document.getElementById("evTheme")?.value.trim();
+ const start=document.getElementById("evDate")?.value;
+ const duration=Number(document.getElementById("evDuration")?.value);
+
+ if(!name||!theme||!start||!Number.isFinite(duration)||duration<1){
+  toast("Lengkapi data event!");
+  return;
+ }
+
+ eventSchedules.push({name,theme,start,duration});
+ saveEvents();
+ publishRoomEvents();
+ updateEventBanner();
+ toast("Event berhasil dibuat!");
+ eventAdmin();
+}
+
+function deleteEvent(i){
+ if(roomActive&&roomUID!==roomHost){
+  toast("Hanya host yang bisa menghapus event!");
+  return;
+ }
+ eventSchedules.splice(i,1);
+ saveEvents();
+ publishRoomEvents();
+ updateEventBanner();
+ eventAdmin();
+}
+
+/* MULTIPLAYER */
+
+function generateRoomCode(){
+ const chars="ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+ let code="";
+ for(let i=0;i<6;i++){
+  code+=chars[Math.floor(Math.random()*chars.length)];
+ }
+ return code;
+}
+
+function roomMenu(){
+ const p=document.getElementById("panel");
+ p.style.display="block";
+
+ p.innerHTML=`
+ <h2>🌐 MULTIPLAYER ROOM</h2>
+ <p>Status: ${roomActive?"🟢 Dalam room "+roomCode:"Belum masuk room"}</p>
+ <label>Nama pemain</label>
+ <input id="roomName" maxlength="16" placeholder="Nama pemain">
+ <hr>
+ <h3>Buat Room</h3>
+ <button onclick="createRoom()">➕ BUAT ROOM</button>
+ <hr>
+ <h3>Gabung Room</h3>
+ <input id="joinCode" maxlength="6" placeholder="Masukkan kode room">
+ <button onclick="joinRoom()">GABUNG ROOM</button>
+ <hr>
+ <button onclick="leaveRoom()">KELUAR ROOM</button>
+ <button onclick="closePanel()">TUTUP</button>
+ `;
+ document.getElementById("roomName").value=playerName;
+}
+
+function waitForAuth(){
+ return new Promise((resolve,reject)=>{
+  if(roomUID)return resolve(roomUID);
+  const timer=setInterval(()=>{
+   if(roomUID){
+    clearInterval(timer);
+    resolve(roomUID);
+   }
+  },200);
+  setTimeout(()=>{
+   clearInterval(timer);
+   if(!roomUID)reject(new Error("Firebase belum terhubung"));
+  },10000);
+ });
+}
+
+async function createRoom(){
+ try{
+  await waitForAuth();
+
+  playerName=document.getElementById("roomName").value.trim().slice(0,16)||"Pemain";
+
+  if(roomActive)await leaveRoom();
+
+  const code=generateRoomCode();
+  const ref=db.ref("rooms/"+code);
+
+  const result=await ref.transaction(current=>{
+   if(current===null){
+    return {
+     host:roomUID,
+     createdAt:Date.now(),
+     events:eventSchedules
+    };
+   }
+   return;
+  });
+
+  if(!result.committed){
+   toast("Kode room sudah digunakan!");
+   return;
+  }
+
+  await enterRoom(code,roomUID);
+  toast("Room dibuat: "+code);
+ }catch(e){
+  console.error(e);
+  toast("Gagal membuat room!");
+ }
+}
+
+async function joinRoom(){
+ try{
+  await waitForAuth();
+
+  playerName=document.getElementById("roomName").value.trim().slice(0,16)||"Pemain";
+
+  const code=document.getElementById("joinCode").value.trim().toUpperCase();
+
+  if(!/^[A-HJ-NP-Z2-9]{6}$/.test(code)){
+   toast("Kode harus 6 karakter!");
+   return;
+  }
+
+  if(roomActive)await leaveRoom();
+
+  const snap=await db.ref("rooms/"+code).once("value");
+
+  if(!snap.exists()){
+   toast("Room tidak ditemukan!");
+   return;
+  }
+
+  await enterRoom(code,snap.val().host);
+  toast("Berhasil masuk room!");
+ }catch(e){
+  console.error(e);
+  toast("Gagal bergabung!");
+ }
+}
+
+
+async function enterRoom(code, host) {
+    try {
+        if (!roomUID) {
+            throw new Error("UID pemain belum tersedia");
+        }
+
+        const playerRef = db.ref(
+            "rooms/" + code + "/players/" + roomUID
+        );
+
+        const roomRef = db.ref("rooms/" + code);
+
+        // Pastikan room masih ada
+        const roomSnap = await roomRef.once("value");
+
+        if (!roomSnap.exists()) {
+            throw new Error("Room tidak ditemukan");
+        }
+
+        roomCode = code;
+        roomHost = host;
+
+        roomPlayerRef = playerRef;
+        roomPlayersRef = db.ref("rooms/" + code + "/players");
+        roomEventsRef = db.ref("rooms/" + code + "/events");
+
+        // Simpan pemain ke Firebase
+        await roomPlayerRef.set({
+            name: playerName || "Pemain",
+            x: player.x,
+            y: player.y,
+            joinedAt: Date.now()
+        });
+
+        // Tandai room aktif setelah berhasil menyimpan
+        roomActive = true;
+
+        roomPlayerRef.onDisconnect().remove();
+
+        // Dengarkan pemain lain
+        roomPlayersRef.on("value", snap => {
+            roomPlayers = snap.val() || {};
+        });
+
+        // Dengarkan event room
+        roomEventsRef.on("value", snap => {
+            const data = snap.val();
+
+            if (data) {
+                roomEvents = Array.isArray(data)
+                    ? data
+                    : Object.values(data);
+
+                eventSchedules = roomEvents;
+                saveEvents();
+                updateEventBanner();
+            }
+        });
+
+        document.getElementById("onlineStatus").textContent =
+            "🟢 ROOM " + code;
+
+        roomMenu();
+        toast("Berhasil masuk room: " + code);
+
+    } catch (e) {
+        console.error("ENTER ROOM ERROR:", e);
+
+        roomActive = false;
+        roomCode = "";
+        roomHost = "";
+
+        document.getElementById("onlineStatus").textContent =
+            "🟢 TERHUBUNG";
+
+        toast("Gagal masuk room: " + e.message);
+    }
+}
+
+function syncRoomPosition(){
+ if(!roomActive||!roomPlayerRef)return;
+
+ const now=Date.now();
+ if(now-lastPositionSync<300)return;
+ lastPositionSync=now;
+
+ roomPlayerRef.update({
+  name:playerName,
+  x:player.x,
+  y:player.y
+ }).catch(console.error);
+}
+
+function publishRoomEvents(){
+ if(!roomActive||roomUID!==roomHost)return;
+
+ db.ref("rooms/"+roomCode+"/events")
+ .set(eventSchedules)
+ .catch(e=>{
+  console.error(e);
+  toast("Event gagal dikirim!");
+ });
+}
+
+
+async function leaveRoom() {
+    const oldPlayerRef = roomPlayerRef;
+    const oldPlayersRef = roomPlayersRef;
+    const oldEventsRef = roomEventsRef;
+
+    // Matikan listener terlebih dahulu
+    if (oldPlayersRef) oldPlayersRef.off();
+    if (oldEventsRef) oldEventsRef.off();
+
+    if (oldPlayerRef) {
+        try {
+            await oldPlayerRef.onDisconnect().cancel();
+            await oldPlayerRef.remove();
+        } catch (e) {
+            console.error("LEAVE ROOM ERROR:", e);
+        }
+    }
+
+    roomActive = false;
+    roomCode = "";
+    roomHost = "";
+    roomPlayers = {};
+    roomEvents = [];
+
+    roomPlayerRef = null;
+    roomPlayersRef = null;
+    roomEventsRef = null;
+
+    document.getElementById("onlineStatus").textContent =
+        roomUID ? "🟢 TERHUBUNG" : "🔴 OFFLINE";
+
+    closePanel();
+    toast("Berhasil keluar dari room!");
+}
+
+/* SIMPAN GAME */
+
+function saveGame(){
+ try{
+  const data={
+   player,
+   money,
+   eggs,
+   pets,
+   index,
+   inventoryEggs,
+   baseEggs:base.eggs,
+   guards
+  };
+
+  localStorage.setItem("SAE_SAVE",JSON.stringify(data));
+  toast("Game berhasil disimpan!");
+ }catch(e){
+  console.error(e);
+  toast("Gagal menyimpan game!");
+ }
+}
+
+function loadGame(){
+ try{
+  const raw=localStorage.getItem("SAE_SAVE");
+  if(!raw){
+   toast("Belum ada data tersimpan!");
+   return;
+  }
+
+  const data=JSON.parse(raw);
+
+  if(data.player)Object.assign(player,data.player);
+  money=Number(data.money)||0;
+  eggs=Array.isArray(data.eggs)?data.eggs:eggs;
+  pets=Array.isArray(data.pets)?data.pets:[];
+  index=Array.isArray(data.index)?data.index:[];
+  inventoryEggs=Array.isArray(data.inventoryEggs)?data.inventoryEggs:[];
+  base.eggs=Array.isArray(data.baseEggs)?data.baseEggs:[];
+
+  if(Array.isArray(data.guards)){
+   data.guards.forEach((g,i)=>{
+    if(guards[i])Object.assign(guards[i],g);
+   });
+  }
+
+  toast("Game berhasil dimuat!");
+ }catch(e){
+  console.error(e);
+  toast("Data simpanan rusak!");
+ }
+}
+
+/* MULAI GAME */
+
+function loop(){
+ move();
+ draw();
+ syncRoomPosition();
+ requestAnimationFrame(loop);
+}
+
+loadGame();
+loop();
+
+</script>
+</body>
+</html>
